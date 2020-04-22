@@ -1,6 +1,7 @@
 use std::cmp::{min, max};
 use image::{ RgbImage, ImageBuffer, DynamicImage, Pixel };
 use image::error::ImageResult;
+use bit_vec::BitVec;
 
 type Pix = (u8,u8,u8,u8);
 
@@ -32,105 +33,169 @@ fn high_bound(a: Pix, b: Pix, c: Pix, d: Pix) -> Pix {
     );
 }
 
+type Point = (u32, u32);
+
+struct ImgCompressor {
+    root: Box<Quadtree>,
+    rank: u32
+}
+
 enum Quadtree {
     Leaf(Pix),
-    Branch(Pix, Pix, Box<Quadtree>, Box<Quadtree>, Box<Quadtree>, Box<Quadtree>),
+    Quad(Pix, Pix, Box<Quadtree>, Box<Quadtree>, Box<Quadtree>, Box<Quadtree>),
     Root(u32, Box<Quadtree>),
 }
 
+struct ImgData<'a> { pixels: &'a Vec<Pix>, rank: u32 }
+
 impl Quadtree {
-    fn construct(input: &Vec<Pix>) -> Box<Quadtree> {
-        let rank = (input.len() as f32).sqrt() as usize;
-        fn build(data: &Vec<Pix>, p: (usize, usize), window: usize, rank: usize) -> Box<Quadtree> {
-            if window == 1 {
-                return Box::new(Quadtree::Leaf(data[p.0 + p.1*rank]))
-            }
-            let s = window/2;
-            let a = build(data, (p.0, p.1), s, rank);
-            let b = build(data, (p.0+s, p.1), s, rank);
-            let c = build(data, (p.0, p.1+s), s, rank);
-            let d = build(data, (p.0+s, p.1+s), s, rank);
-            return Box::new(Quadtree::Branch(
-                low_bound((*a).min(), (*b).min(), (*c).min(), (*d).min()),
-                high_bound((*a).max(), (*b).max(), (*c).max(), (*d).max()),
-                a, b, c, d,
-            ));
+    fn build(data: &ImgData, p: Point, window: u32) -> Box<Quadtree> {
+        if window == 1 {
+            let pixel = data.pixels[(p.0 + p.1*data.rank) as usize];
+            return Box::new(Quadtree::Leaf(pixel))
         }
-        assert!(input.len() == rank * rank);
-        return Box::new(Quadtree::Root(rank as u32, build(input, (0, 0), rank, rank)));
+        let s = window / 2;
+        let a = Quadtree::build(data, (p.0, p.1), s);
+        let b = Quadtree::build(data, (p.0+s, p.1), s);
+        let c = Quadtree::build(data, (p.0, p.1+s), s);
+        let d = Quadtree::build(data, (p.0+s, p.1+s), s);
+        return Box::new(Quadtree::Quad(
+            low_bound((*a).min(), (*b).min(), (*c).min(), (*d).min()),
+            high_bound((*a).max(), (*b).max(), (*c).max(), (*d).max()),
+            a, b, c, d,
+        ));
     }
     fn min(&self) -> Pix {
         match self {
             Quadtree::Leaf(value) => *value,
-            Quadtree::Branch(minimum, _, _, _, _, _) => *minimum,
+            Quadtree::Quad(minimum, _, _, _, _, _) => *minimum,
             Quadtree::Root(_, data) => data.min(),
         }
     }
     fn max(&self) -> Pix {
         match self {
             Quadtree::Leaf(value) => *value,
-            Quadtree::Branch(_, maximum, _, _, _, _) => *maximum,
+            Quadtree::Quad(_, maximum, _, _, _, _) => *maximum,
             Quadtree::Root(_, data) => data.max(),
         }
     }
 }
 
+struct PixelReq { x: u32, y: u32, chan: u8, cutoff: u8 }
+
 impl Quadtree {
-    fn get(&self, component: u8, threshold: u8, x: u32, y: u32, offset_x: u32, offset_y: u32, window: u32) -> u8 {
+    fn get(&self, req: PixelReq, win_x: u32, win_y: u32, win_size: u32) -> u8 {
         match self {
-            Quadtree::Leaf(value) => channel(value, component),
-            Quadtree::Branch(min, max, a, b, c, d) => {
-                if (channel(max, component) - channel(min, component)) < threshold {
-                    return channel(max, component)/2 + channel(min, component)/2;
+            Quadtree::Leaf(value) => channel(value, req.chan),
+            Quadtree::Quad(min, max, a, b, c, d) => {
+                let contrast = channel(max, req.chan) - channel(min, req.chan);
+                if contrast < req.cutoff {
+                    return channel(max, req.chan)/2 + channel(min, req.chan)/2;
                 } else {
-                    let s = window/2;
-                    let left = (x - offset_x) < s;
-                    let top = (y - offset_y) < s;
+                    let s = win_size/2;
+                    let left = (req.x - win_x) < s;
+                    let top = (req.y - win_y) < s;
                     match (left, top) {
-                        (true, true) => a.get(component, threshold, x, y, offset_x, offset_y, s),
-                        (false, true) => b.get(component, threshold, x, y, offset_x +  s, offset_y, s),
-                        (true, false) => c.get(component, threshold, x, y, offset_x, offset_y + s, s),
-                        (false, false) => d.get(component, threshold, x, y, offset_x + s, offset_y + s, s),
+                        (true, true) => a.get(req, win_x, win_y, s),
+                        (false, true) => b.get(req, win_x +  s, win_y, s),
+                        (true, false) => c.get(req, win_x, win_y + s, s),
+                        (false, false) => d.get(req, win_x + s, win_y + s, s),
                     }
                 }
             },
-            Quadtree::Root(_, data) => data.get(component, threshold, x, y, offset_x, offset_y, window),
+            Quadtree::Root(_, data) => data.get(req, win_x, win_y, win_size),
         }
     }
-    fn to_image(&self) -> RgbImage {
+    fn size(&self, cutoffs: (u8, u8, u8)) -> usize {
+        match self {
+            Quadtree::Leaf(_) => 1,
+            Quadtree::Quad(_, _, a, b, c, d) => {
+                a.size(cutoffs) +
+                b.size(cutoffs) +
+                c.size(cutoffs) +
+                d.size(cutoffs) + 1
+            },
+            Quadtree::Root(_, data) => data.size(cutoffs),
+        }
+    }
+    fn build_index(&self, quad_index: &mut BitVec) {
+        match self {
+            Quadtree::Leaf(_) => {
+                quad_index.push(false);
+            },
+            Quadtree::Quad(_, _, a, b, c, d) => {
+                quad_index.push(true);
+                a.build_index(quad_index);
+                b.build_index(quad_index);
+                c.build_index(quad_index);
+                d.build_index(quad_index);
+            },
+            Quadtree::Root(_, _) => {},
+        }
+    }
+    fn build_leaf_data(&self, leaf_data: &mut Vec<Pix>) {
+        match self {
+            Quadtree::Leaf(value) => leaf_data.push(*value),
+            Quadtree::Quad(_, _, a, b, c, d) => {
+                a.build_leaf_data(leaf_data);
+                b.build_leaf_data(leaf_data);
+                c.build_leaf_data(leaf_data);
+                d.build_leaf_data(leaf_data);
+            },
+            Quadtree::Root(_, _) => {},
+        }
+    }
+    fn to_image(&self, cutoffs: (u8, u8, u8)) -> RgbImage {
         match self {
             Quadtree::Leaf(_) => panic!(),
-            Quadtree::Branch(_, _, _, _, _, _) => panic!(),
-            Quadtree::Root(rank, data) => ImageBuffer::from_fn(*rank, *rank, |x, y| {
-                let r = data.get(0, 50, x, y, 0, 0, *rank);
-                let g = data.get(1, 4, x, y, 0, 0, *rank);
-                let b = data.get(2, 100, x, y, 0, 0, *rank);
-                image::Rgb([r, g, b])
-            }),
+            Quadtree::Quad(_, _, _, _, _, _) => panic!(),
+            Quadtree::Root(rank, data) => {
+                return ImageBuffer::from_fn(*rank, *rank, |x, y| {
+                    let r = PixelReq{ x, y, chan: 0, cutoff: cutoffs.0 };
+                    let g = PixelReq{ x, y, chan: 1, cutoff: cutoffs.1 };
+                    let b = PixelReq{ x, y, chan: 2, cutoff: cutoffs.2 };
+                    image::Rgb([
+                        data.get(r, 0, 0, *rank),
+                        data.get(g, 0, 0, *rank),
+                        data.get(b, 0, 0, *rank),
+                    ])
+                })
+            },
         }
     }
 }
 
-fn analyze_img(img_res: ImageResult<DynamicImage>) -> Box<Quadtree> {
-    let rgb = img_res.unwrap().to_rgb();
-    let pixels = rgb.pixels();
-    let len = pixels.len();
-    let mut data = vec![(0u8,0u8,0u8,0u8); len];
-    for (i, pixel) in pixels.enumerate() {
-        data[i] = pixel.channels4();
+impl ImgCompressor {
+    fn new(img_res: ImageResult<DynamicImage>) -> ImgCompressor {
+        let rgb = img_res.unwrap().to_rgb();
+        let pixels = rgb.pixels();
+        let len = pixels.len();
+        let mut data = vec![(0u8,0u8,0u8,0u8); len];
+        for (i, pixel) in pixels.enumerate() {
+            data[i] = pixel.channels4();
+        }
+        return ImgCompressor {
+            root: ImgCompressor::build_tree(&data),
+            rank: 0,
+        };
     }
-    return Quadtree::construct(&data);
+    fn build_tree(pixels: &Vec<Pix>) -> Box<Quadtree> {
+        let rank = (pixels.len() as f32).sqrt() as u32;
+        assert!(pixels.len() as u32 == rank * rank);
+        let img = ImgData { pixels, rank };
+        let quadtree = Quadtree::build(&img, (0, 0), rank);
+        return Box::new(Quadtree::Root(rank as u32, quadtree));
+    }
 }
 
 fn main() {
-    // let v: Vec<i32> = vec![
-    //     4, 2, 5, 5,
-    //     2, 2, 5, 2,
-    //     2, 3, 2, 2,
-    //     2, 3, 2, 2
-    // ];
-    //let x = Quadtree::construct(&v);
-    let x = analyze_img(image::open("./lena.png"));
-    let res = x.to_image().save("./output.png");
+    let compression = (50, 4, 100);
+    let compressor = ImgCompressor::new(image::open("./lena.png"));
+    let node_count = compressor.root.size(compression);
+    let mut quad_index = BitVec::from_elem(node_count, true);
+    let quad_index = compressor.root.build_index(&mut quad_index);
+    let mut leaf_data = vec![(0u8,0u8,0u8,0u8); 0];
+    let data = compressor.root.build_leaf_data(&mut leaf_data);
+    let res = compressor.root.to_image(compression).save("./output.png");
     println!("saved image: {}", res.is_ok());
 }
