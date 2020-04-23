@@ -2,7 +2,7 @@ use bit_vec::BitVec;
 use image::{ RgbImage, DynamicImage, ImageBuffer, Pixel };
 use image::error::ImageResult;
 
-use crate::quadtree::{ Quadtree, Pix, ImgData, PixelReq };
+use crate::quadtree::{ Quadtree, Pix, ImgData, Cutoff, ChannelReq };
 
 pub struct ImgCompressor {
     pub root: Box<Quadtree>,
@@ -20,38 +20,38 @@ impl ImgCompressor {
         let rank = (data.len() as f32).sqrt() as u32;
         assert!(data.len() as u32 == rank * rank);
         let img = ImgData { pixels: &data, rank };
-        let quadtree = Quadtree::build(&img, (0, 0), rank);
-        let root = Box::new(Quadtree::Root(rank as u32, quadtree));
+        let root = Quadtree::build(&img, (0, 0), rank);
         return ImgCompressor { root, rank };
     }
-    pub fn build_tree(data: &Vec<Pix>) -> Box<Quadtree> {
-        let rank = (data.len() as f32).sqrt() as u32;
-        assert!(data.len() as u32 == rank * rank);
-        let img = ImgData { pixels: data, rank };
-        let quadtree = Quadtree::build(&img, (0, 0), rank);
-        return Box::new(Quadtree::Root(rank as u32, quadtree));
-    }
-    pub fn leaf_index(&self, compression: (u8, u8, u8)) -> BitVec {
-        let node_count = self.root.size(compression);
-        let mut quad_index = BitVec::from_elem(node_count, true);
-        self.root.build_index(&mut quad_index);
+    pub fn leaf_index(&self, request: ChannelReq) -> BitVec {
+        let mut quad_index = BitVec::new();
+        self.root.build_leaf_index(&mut quad_index, request);
         return quad_index;
     }
-    pub fn leaf_data(&self) -> Vec<Pix> {
-        let mut leaf_data = vec![(0u8,0u8,0u8,0u8); 0];
-        self.root.build_leaf_data(&mut leaf_data);
+    pub fn leaf_data(&self, request: ChannelReq) -> Vec<u8> {
+        let mut leaf_data = vec![0u8; 0];
+        self.root.build_leaf_data(&mut leaf_data, request);
         return leaf_data;
     }
-    pub fn to_image(&self, cutoffs: (u8, u8, u8)) -> RgbImage {
+    pub fn compressed_size(&self, cutoffs: Cutoff) -> usize {
+        let rd = self.leaf_data(ChannelReq{ chan: 0, cutoff: cutoffs.0 });
+        let gd = self.leaf_data(ChannelReq{ chan: 1, cutoff: cutoffs.1 });
+        let bd = self.leaf_data(ChannelReq{ chan: 2, cutoff: cutoffs.2 });
+        let ri = self.leaf_index(ChannelReq{ chan: 0, cutoff: cutoffs.0 });
+        let gi = self.leaf_index(ChannelReq{ chan: 1, cutoff: cutoffs.1 });
+        let bi = self.leaf_index(ChannelReq{ chan: 2, cutoff: cutoffs.2 });
+        return rd.len()+gd.len()+bd.len() + (ri.len()+gi.len()+bi.len())/8;
+    }
+    pub fn to_image(&self, cutoffs: Cutoff) -> RgbImage {
         let rank = self.rank;
         return ImageBuffer::from_fn(rank, rank, |x, y| {
-            let r = PixelReq{ x, y, chan: 0, cutoff: cutoffs.0 };
-            let g = PixelReq{ x, y, chan: 1, cutoff: cutoffs.1 };
-            let b = PixelReq{ x, y, chan: 2, cutoff: cutoffs.2 };
+            let r = ChannelReq{ chan: 0, cutoff: cutoffs.0 };
+            let g = ChannelReq{ chan: 1, cutoff: cutoffs.1 };
+            let b = ChannelReq{ chan: 2, cutoff: cutoffs.2 };
             image::Rgb([
-                self.root.get(r, 0, 0, rank),
-                self.root.get(g, 0, 0, rank),
-                self.root.get(b, 0, 0, rank),
+                self.root.get((x, y), r, (0, 0), rank),
+                self.root.get((x, y), g, (0, 0), rank),
+                self.root.get((x, y), b, (0, 0), rank),
             ])
         });
     }

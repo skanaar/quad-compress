@@ -6,10 +6,12 @@ pub struct ImgData<'a> { pub pixels: &'a Vec<Pix>, pub rank: u32 }
 pub enum Quadtree {
     Leaf(Pix),
     Quad(Pix, Pix, Box<Quadtree>, Box<Quadtree>, Box<Quadtree>, Box<Quadtree>),
-    Root(u32, Box<Quadtree>),
 }
 
-pub struct PixelReq { pub x: u32, pub y: u32, pub chan: u8, pub cutoff: u8 }
+pub type Cutoff = (u8, u8, u8);
+
+#[derive(Clone, Copy)]
+pub struct ChannelReq { pub chan: u8, pub cutoff: u8 }
 pub type Point = (u32, u32);
 
 fn channel(pixel: &Pix, i: u8) -> u8 {
@@ -61,75 +63,59 @@ impl Quadtree {
         match self {
             Quadtree::Leaf(value) => *value,
             Quadtree::Quad(minimum, _, _, _, _, _) => *minimum,
-            Quadtree::Root(_, data) => data.min(),
         }
     }
     pub fn max(&self) -> Pix {
         match self {
             Quadtree::Leaf(value) => *value,
             Quadtree::Quad(_, maximum, _, _, _, _) => *maximum,
-            Quadtree::Root(_, data) => data.max(),
         }
     }
-    pub fn get(&self, req: PixelReq, win_x: u32, win_y: u32, win_size: u32) -> u8 {
+    pub fn get(&self, p: Point, req: ChannelReq, w: Point, window: u32) -> u8 {
         match self {
             Quadtree::Leaf(value) => channel(value, req.chan),
             Quadtree::Quad(min, max, a, b, c, d) => {
                 let contrast = channel(max, req.chan) - channel(min, req.chan);
                 if contrast < req.cutoff {
                     return channel(max, req.chan)/2 + channel(min, req.chan)/2;
-                } else {
-                    let s = win_size/2;
-                    let left = (req.x - win_x) < s;
-                    let top = (req.y - win_y) < s;
-                    match (left, top) {
-                        (true, true) => a.get(req, win_x, win_y, s),
-                        (false, true) => b.get(req, win_x +  s, win_y, s),
-                        (true, false) => c.get(req, win_x, win_y + s, s),
-                        (false, false) => d.get(req, win_x + s, win_y + s, s),
-                    }
+                }
+                let s = window/2;
+                let left = (p.0 - w.0) < s;
+                let top = (p.1 - w.1) < s;
+                return match (left, top) {
+                    (true, true) => a.get(p, req, (w.0, w.1), s),
+                    (false, true) => b.get(p, req, (w.0+s, w.1), s),
+                    (true, false) => c.get(p, req, (w.0, w.1+s), s),
+                    (false, false) => d.get(p, req, (w.0+s, w.1+s), s),
                 }
             },
-            Quadtree::Root(_, data) => data.get(req, win_x, win_y, win_size),
         }
     }
-    pub fn size(&self, cutoffs: (u8, u8, u8)) -> usize {
-        match self {
-            Quadtree::Leaf(_) => 1,
-            Quadtree::Quad(_, _, a, b, c, d) => {
-                a.size(cutoffs) +
-                b.size(cutoffs) +
-                c.size(cutoffs) +
-                d.size(cutoffs) + 1
-            },
-            Quadtree::Root(_, data) => data.size(cutoffs),
-        }
-    }
-    pub fn build_index(&self, quad_index: &mut BitVec) {
+    pub fn build_leaf_index(&self, quad_index: &mut BitVec, req: ChannelReq) {
         match self {
             Quadtree::Leaf(_) => {
                 quad_index.push(false);
             },
             Quadtree::Quad(_, _, a, b, c, d) => {
                 quad_index.push(true);
-                a.build_index(quad_index);
-                b.build_index(quad_index);
-                c.build_index(quad_index);
-                d.build_index(quad_index);
+                // TODO: use req.cutoff
+                a.build_leaf_index(quad_index, req);
+                b.build_leaf_index(quad_index, req);
+                c.build_leaf_index(quad_index, req);
+                d.build_leaf_index(quad_index, req);
             },
-            Quadtree::Root(_, _) => {},
         }
     }
-    pub fn build_leaf_data(&self, leaf_data: &mut Vec<Pix>) {
+    pub fn build_leaf_data(&self, leaf_data: &mut Vec<u8>, req: ChannelReq) {
         match self {
-            Quadtree::Leaf(value) => leaf_data.push(*value),
+            Quadtree::Leaf(value) => leaf_data.push(channel(value, req.chan)),
             Quadtree::Quad(_, _, a, b, c, d) => {
-                a.build_leaf_data(leaf_data);
-                b.build_leaf_data(leaf_data);
-                c.build_leaf_data(leaf_data);
-                d.build_leaf_data(leaf_data);
+                // TODO: use req.cutoff
+                a.build_leaf_data(leaf_data, req);
+                b.build_leaf_data(leaf_data, req);
+                c.build_leaf_data(leaf_data, req);
+                d.build_leaf_data(leaf_data, req);
             },
-            Quadtree::Root(_, _) => {},
         }
     }
 }
