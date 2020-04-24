@@ -33,6 +33,10 @@ fn low_bound(a: Pix, b: Pix, c: Pix, d: Pix) -> Pix {
     );
 }
 
+fn lerp(a: u8, b: u8, k: f32) -> u8 {
+    return ((a as f32) * (1f32-k) + (b as f32) * (k)) as u8;
+}
+
 fn high_bound(a: Pix, b: Pix, c: Pix, d: Pix) -> Pix {
     return (
         max(max(a.0, b.0), max(c.0, d.0)),
@@ -77,7 +81,16 @@ impl Quadtree {
             Quadtree::Quad(min, max, a, b, c, d) => {
                 let contrast = channel(max, req.chan) - channel(min, req.chan);
                 if contrast < req.cutoff {
-                    return channel(max, req.chan)/2 + channel(min, req.chan)/2;
+                    //return channel(max, req.chan)/2 + channel(min, req.chan)/2;
+                    let uncompressed = ChannelReq { chan: req.chan, cutoff: 0 };
+                    let d = window-1;
+                    let tl = self.get(p, uncompressed, w, window);
+                    let tr = self.get((p.0+d, p.1), uncompressed, w, window);
+                    let bl = self.get((p.0, p.1+d), uncompressed, w, window);
+                    let br = self.get((p.0+d, p.1+d), uncompressed, w, window);
+                    let dx = ((p.0 - w.0) as f32) / (window as f32);
+                    let dy = ((p.1 - w.1) as f32) / (window as f32);
+                    return lerp(lerp(tl, tr, dx), lerp(bl, br, dx), dy);
                 }
                 let s = window/2;
                 let left = (p.0 - w.0) < s;
