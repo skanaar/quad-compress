@@ -1,5 +1,6 @@
+use bitvec::prelude::Local;
 use std::cmp::{min, max};
-use bit_vec::BitVec;
+use bitvec::vec::BitVec;
 
 pub type Pix = (u8,u8,u8,u8);
 pub struct ImgData<'a> { pub pixels: &'a Vec<Pix>, pub rank: u32 }
@@ -88,9 +89,10 @@ impl Quadtree {
                     let tr = self.get((p.0+d, p.1), uncompressed, w, window);
                     let bl = self.get((p.0, p.1+d), uncompressed, w, window);
                     let br = self.get((p.0+d, p.1+d), uncompressed, w, window);
-                    let dx = ((p.0 - w.0) as f32) / (window as f32);
-                    let dy = ((p.1 - w.1) as f32) / (window as f32);
-                    return lerp(lerp(tl, tr, dx), lerp(bl, br, dx), dy);
+                    return lerp(lerp(tl, tr, 0.5), lerp(bl, br, 0.5), 0.5);
+                    //let dx = ((p.0 - w.0) as f32) / (window as f32);
+                    //let dy = ((p.1 - w.1) as f32) / (window as f32);
+                    //return lerp(lerp(tl, tr, dx), lerp(bl, br, dx), dy);
                 }
                 let s = window/2;
                 let left = (p.0 - w.0) < s;
@@ -104,30 +106,44 @@ impl Quadtree {
             },
         }
     }
-    pub fn build_leaf_index(&self, quad_index: &mut BitVec, req: ChannelReq) {
+    pub fn build_leaf_index(&self, quad_index: &mut BitVec<Local, u8>, req: ChannelReq) {
         match self {
             Quadtree::Leaf(_) => {
                 quad_index.push(false);
             },
-            Quadtree::Quad(_, _, a, b, c, d) => {
-                quad_index.push(true);
-                // TODO: use req.cutoff
-                a.build_leaf_index(quad_index, req);
-                b.build_leaf_index(quad_index, req);
-                c.build_leaf_index(quad_index, req);
-                d.build_leaf_index(quad_index, req);
+            Quadtree::Quad(min, max, a, b, c, d) => {
+                let contrast = channel(max, req.chan) - channel(min, req.chan);
+                if contrast < req.cutoff {
+                    quad_index.push(false);
+                } else {
+                    quad_index.push(true);
+                    a.build_leaf_index(quad_index, req);
+                    b.build_leaf_index(quad_index, req);
+                    c.build_leaf_index(quad_index, req);
+                    d.build_leaf_index(quad_index, req);
+                }
             },
         }
     }
     pub fn build_leaf_data(&self, leaf_data: &mut Vec<u8>, req: ChannelReq) {
         match self {
             Quadtree::Leaf(value) => leaf_data.push(channel(value, req.chan)),
-            Quadtree::Quad(_, _, a, b, c, d) => {
-                // TODO: use req.cutoff
-                a.build_leaf_data(leaf_data, req);
-                b.build_leaf_data(leaf_data, req);
-                c.build_leaf_data(leaf_data, req);
-                d.build_leaf_data(leaf_data, req);
+            Quadtree::Quad(min, max, a, b, c, d) => {
+                let contrast = channel(max, req.chan) - channel(min, req.chan);
+                if contrast < req.cutoff {
+                    let average = (
+                        min.0/2 + max.0/2,
+                        min.1/2 + max.1/2,
+                        min.2/2 + max.2/2,
+                        min.3/2 + max.3/2,
+                    );
+                    leaf_data.push(channel(&average, req.chan));
+                } else {
+                    a.build_leaf_data(leaf_data, req);
+                    b.build_leaf_data(leaf_data, req);
+                    c.build_leaf_data(leaf_data, req);
+                    d.build_leaf_data(leaf_data, req);
+                }
             },
         }
     }
