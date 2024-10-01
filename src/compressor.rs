@@ -11,7 +11,7 @@ fn clamp_u8(x: f32) -> u8 {
     else { return x as u8 };
 }
 
-fn rgb_to_ycc(rgb: Pix) -> Pix {
+fn rgba_to_ycca(rgb: Pix) -> Pix {
     let r = rgb.0 as f32;
     let g = rgb.1 as f32;
     let b = rgb.2 as f32;
@@ -23,7 +23,7 @@ fn rgb_to_ycc(rgb: Pix) -> Pix {
     )
 }
 
-fn ycc_to_rgb(ycc: Pix) -> Pix {
+fn ycca_to_rgba(ycc: Pix) -> Pix {
     let y = ycc.0 as f32;
     let cb = (ycc.1 as f32) - 128.0;
     let cr = (ycc.2 as f32) - 128.0;
@@ -36,32 +36,32 @@ fn ycc_to_rgb(ycc: Pix) -> Pix {
 }
 
 pub struct ImgCompressor {
-    pub root: Box<Quadtree>,
+    pub quadtree_root: Box<Quadtree>,
     pub rank: u32
 }
 
 impl ImgCompressor {
     pub fn new(img_res: ImageResult<DynamicImage>) -> ImgCompressor {
-        let rgb = img_res.unwrap().to_rgb();
+        let rgb = img_res.unwrap().to_rgb8();
         let pixel_buffer = rgb.pixels();
         let mut data = vec![(0u8,0u8,0u8,0u8); pixel_buffer.len()];
         for (i, pixel) in pixel_buffer.enumerate() {
-            data[i] = rgb_to_ycc(pixel.channels4());
+            data[i] = rgba_to_ycca(pixel.channels4());
         }
         let rank = (data.len() as f32).sqrt() as u32;
         assert!(data.len() as u32 == rank * rank);
         let img = ImgData { pixels: &data, rank };
-        let root = Quadtree::build(&img, (0, 0), rank);
-        return ImgCompressor { root, rank };
+        let quadtree_root = Quadtree::build(&img, (0, 0), rank);
+        return ImgCompressor { quadtree_root, rank };
     }
     pub fn leaf_index(&self, request: ChannelReq) -> BitVec<Local, u8> {
         let mut quad_index: BitVec<Local, u8> = BitVec::new();
-        self.root.build_leaf_index(&mut quad_index, request);
+        self.quadtree_root.build_leaf_index(&mut quad_index, request);
         return quad_index;
     }
     pub fn leaf_data(&self, request: ChannelReq) -> Vec<u8> {
         let mut leaf_data = vec![0u8; 0];
-        self.root.build_leaf_data(&mut leaf_data, request);
+        self.quadtree_root.build_leaf_data(&mut leaf_data, request);
         return leaf_data;
     }
     pub fn compressed_size(&self, cutoffs: Cutoff) -> usize {
@@ -84,11 +84,11 @@ impl ImgCompressor {
         let g_index = self.leaf_index(g).into_vec();
         let b_index = self.leaf_index(b).into_vec();
         return [
-            &r_index[..], 
-            &g_index[..], 
-            &b_index[..], 
-            &r_leaf[..], 
-            &g_leaf[..], 
+            &r_index[..],
+            &g_index[..],
+            &b_index[..],
+            &r_leaf[..],
+            &g_leaf[..],
             &b_leaf[..]
         ].concat();
     }
@@ -98,10 +98,10 @@ impl ImgCompressor {
             let r = ChannelReq{ chan: 0, cutoff: cutoffs.0 };
             let g = ChannelReq{ chan: 1, cutoff: cutoffs.1 };
             let b = ChannelReq{ chan: 2, cutoff: cutoffs.2 };
-            let rgb = ycc_to_rgb((
-                self.root.get((x, y), r, (0, 0), rank),
-                self.root.get((x, y), g, (0, 0), rank),
-                self.root.get((x, y), b, (0, 0), rank),
+            let rgb = ycca_to_rgba((
+                self.quadtree_root.get((x, y), r, (0, 0), rank),
+                self.quadtree_root.get((x, y), g, (0, 0), rank),
+                self.quadtree_root.get((x, y), b, (0, 0), rank),
                 255,
             ));
             image::Rgb([
