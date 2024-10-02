@@ -2,8 +2,8 @@ use bitvec::prelude::Local;
 use bitvec::vec::BitVec;
 use image::{ RgbImage, DynamicImage, ImageBuffer, Pixel };
 use image::error::ImageResult;
-
 use crate::quadtree::Quadtree;
+use crate::serialize::{ build_leaf_index, build_leaf_data };
 
 type Pix = (u8, u8, u8, u8);
 pub type Cutoff = (u8, u8, u8);
@@ -68,12 +68,12 @@ impl ImgCompressor {
     }
     pub fn leaf_index(&self, quadtree_root: &Box<Quadtree>, cutoff: u8) -> BitVec<Local, u8> {
         let mut quad_index: BitVec<Local, u8> = BitVec::new();
-        quadtree_root.build_leaf_index(&mut quad_index, cutoff);
+        build_leaf_index(quadtree_root, &mut quad_index, cutoff);
         return quad_index;
     }
     pub fn leaf_data(&self, quadtree_root: &Box<Quadtree>, cutoff: u8) -> Vec<u8> {
         let mut leaf_data = vec![0u8; 0];
-        quadtree_root.build_leaf_data(&mut leaf_data, cutoff);
+        build_leaf_data(quadtree_root, &mut leaf_data, cutoff);
         return leaf_data;
     }
     pub fn compressed_size(&self, cutoffs: Cutoff) -> usize {

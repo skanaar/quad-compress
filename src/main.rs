@@ -1,7 +1,7 @@
 mod compressor;
 mod quadtree;
+mod serialize;
 use std::{env, fs};
-
 use crate::compressor::ImgCompressor;
 
 fn main() {

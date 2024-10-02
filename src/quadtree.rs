@@ -1,6 +1,4 @@
-use bitvec::prelude::Local;
 use std::cmp::{min, max};
-use bitvec::vec::BitVec;
 
 pub type BitmapData<'a> = &'a Vec<u8>;
 pub enum Quadtree {
@@ -45,6 +43,7 @@ impl Quadtree {
             Quadtree::Quad(_, maximum, _, _, _, _, _) => *maximum,
         }
     }
+    #[allow(dead_code)]
     pub fn get(&self, p: Point) -> u8 {
         match self {
             Quadtree::Leaf(value) => *value,
@@ -92,42 +91,6 @@ impl Quadtree {
             },
         }
     }
-    pub fn build_leaf_index(&self, quad_index: &mut BitVec<Local, u8>, cutoff: u8) {
-        match self {
-            Quadtree::Leaf(_) => {
-                quad_index.push(false);
-            },
-            Quadtree::Quad(min, max, a, b, c, d, _) => {
-                let contrast = max - min;
-                if contrast < cutoff {
-                    quad_index.push(false);
-                } else {
-                    quad_index.push(true);
-                    a.build_leaf_index(quad_index, cutoff);
-                    b.build_leaf_index(quad_index, cutoff);
-                    c.build_leaf_index(quad_index, cutoff);
-                    d.build_leaf_index(quad_index, cutoff);
-                }
-            },
-        }
-    }
-    pub fn build_leaf_data(&self, leaf_data: &mut Vec<u8>, cutoff: u8) {
-        match self {
-            Quadtree::Leaf(value) => leaf_data.push(*value),
-            Quadtree::Quad(min, max, a, b, c, d, _) => {
-                let contrast = max - min;
-                if contrast < cutoff {
-                    let average = min/2 + max/2;
-                    leaf_data.push(average);
-                } else {
-                    a.build_leaf_data(leaf_data, cutoff);
-                    b.build_leaf_data(leaf_data, cutoff);
-                    c.build_leaf_data(leaf_data, cutoff);
-                    d.build_leaf_data(leaf_data, cutoff);
-                }
-            },
-        }
-    }
 }
 
 fn low_bound(a: u8, b: u8, c: u8, d: u8) -> u8 {
@@ -136,10 +99,6 @@ fn low_bound(a: u8, b: u8, c: u8, d: u8) -> u8 {
 
 fn high_bound(a: u8, b: u8, c: u8, d: u8) -> u8 {
     return max(max(a, b), max(c, d));
-}
-
-fn lerp(a: u8, b: u8, k: f32) -> u8 {
-    return ((a as f32) * (1f32-k) + (b as f32) * (k)) as u8;
 }
 
 #[cfg(test)]
