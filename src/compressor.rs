@@ -61,9 +61,9 @@ impl ImgCompressor {
         }
         let rank = (pixel_len as f32).sqrt() as u32;
         assert!(pixel_len as u32 == rank * rank);
-        let lumin_root = Quadtree::build(&&lumin);
-        let c_blu_root = Quadtree::build(&&c_blu);
-        let c_red_root = Quadtree::build(&&c_red);
+        let lumin_root = Quadtree::new(&&lumin);
+        let c_blu_root = Quadtree::new(&&c_blu);
+        let c_red_root = Quadtree::new(&&c_red);
         return ImgCompressor { lumin_root, c_blu_root, c_red_root, rank };
     }
     pub fn leaf_index(&self, quadtree_root: &Box<Quadtree>, cutoff: u8) -> BitVec<Local, u8> {
@@ -105,9 +105,9 @@ impl ImgCompressor {
         let rank = self.rank;
         return ImageBuffer::from_fn(rank, rank, |x, y| {
             let rgb = ycca_to_rgba((
-                self.lumin_root.get((x, y), cutoffs.0, (0, 0), rank),
-                self.c_blu_root.get((x, y), cutoffs.1, (0, 0), rank),
-                self.c_red_root.get((x, y), cutoffs.2, (0, 0), rank),
+                self.lumin_root.get_approx((x, y), cutoffs.0),
+                self.c_blu_root.get_approx((x, y), cutoffs.1),
+                self.c_red_root.get_approx((x, y), cutoffs.2),
                 0
             ));
             image::Rgb([rgb.0,rgb.1,rgb.2])
