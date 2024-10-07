@@ -1,14 +1,14 @@
 use bitvec::prelude::Local;
 use bitvec::vec::BitVec;
-use crate::quadtree::Quadtree;
+use crate::quadtree::{range, Quadtree};
 
 pub fn build_leaf_index(quadtree: &Quadtree, quad_index: &mut BitVec<Local, u8>, cutoff: u8) {
     match quadtree {
-        Quadtree::Leaf(_, _, _, _) => {
+        Quadtree::Leaf(..) => {
             quad_index.push(false);
         },
-        Quadtree::Branch(min, max, a, b, c, d, _) => {
-            let contrast = max - min;
+        Quadtree::Branch(a, b, c, d, (a_val, b_val, c_val, d_val), _) => {
+            let contrast = range(a_val, b_val, c_val, d_val);
             if contrast < cutoff {
                 quad_index.push(false);
             } else {
@@ -30,8 +30,8 @@ pub fn build_leaf_data(quadtree: &Quadtree, leaf_data: &mut Vec<u8>, cutoff: u8)
             leaf_data.push(*c);
             leaf_data.push(*d);
         },
-        Quadtree::Branch(min, max, a, b, c, d, _) => {
-            let contrast = max - min;
+        Quadtree::Branch(a, b, c, d, _, meta) => {
+            let contrast = meta.high - meta.low;
             if contrast < cutoff {
                 leaf_data.push(quadtree.average());
             } else {
