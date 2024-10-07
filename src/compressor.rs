@@ -104,10 +104,11 @@ impl ImgCompressor {
     pub fn to_image(&self, cutoffs: Cutoff) -> RgbImage {
         let rank = self.rank;
         return ImageBuffer::from_fn(rank, rank, |x, y| {
+            let p = (x as usize, y as usize);
             let rgb = ycca_to_rgba((
-                self.lumin_root.get_approx((x, y), cutoffs.0),
-                self.c_blu_root.get_approx((x, y), cutoffs.1),
-                self.c_red_root.get_approx((x, y), cutoffs.2),
+                self.lumin_root.get_approx(p, cutoffs.0),
+                self.c_blu_root.get_approx(p, cutoffs.1),
+                self.c_red_root.get_approx(p, cutoffs.2),
                 0
             ));
             image::Rgb([rgb.0,rgb.1,rgb.2])

@@ -1,30 +1,37 @@
 use std::cmp::{min, max};
 
 pub type BitmapData<'a> = &'a Vec<u8>;
+
+
+
 pub enum Quadtree {
-    Leaf(u8),
-    Quad(u8, u8, Box<Quadtree>, Box<Quadtree>, Box<Quadtree>, Box<Quadtree>, u32),
+    Leaf(u8, u8, u8, u8),
+    Branch(u8, u8, Box<Quadtree>, Box<Quadtree>, Box<Quadtree>, Box<Quadtree>, usize),
 }
 
-pub type Point = (u32, u32);
+pub type Point = (usize, usize);
 
 impl Quadtree {
     pub fn new(pixels: BitmapData) -> Box<Quadtree> {
-        let rank = (pixels.len() as f32).sqrt() as u32;
-        assert!(pixels.len() as u32 == rank * rank);
+        let rank = (pixels.len() as f32).sqrt() as usize;
+        assert!(pixels.len() as usize == rank * rank);
         return Quadtree::build(pixels, rank, (0,0), rank);
     }
-    fn build(pixels: BitmapData, rank: u32, p: Point, window: u32) -> Box<Quadtree> {
-        if window == 1 {
-            let pixel = pixels[(p.0 + p.1*rank) as usize];
-            return Box::new(Quadtree::Leaf(pixel))
+    fn build(pixels: BitmapData, rank: usize, p: Point, window: usize) -> Box<Quadtree> {
+        if window == 2 {
+            return Box::new(Quadtree::Leaf(
+                pixels[(p.0) + (p.1*rank)],
+                pixels[(p.0+1) + (p.1*rank)],
+                pixels[(p.0) + (p.1*rank+1)],
+                pixels[(p.0+1) + (p.1*rank+1)]
+            ))
         }
         let s = window / 2;
         let a = Quadtree::build(pixels, rank, (p.0, p.1), s);
         let b = Quadtree::build(pixels, rank, (p.0+s, p.1), s);
         let c = Quadtree::build(pixels, rank, (p.0, p.1+s), s);
         let d = Quadtree::build(pixels, rank, (p.0+s, p.1+s), s);
-        return Box::new(Quadtree::Quad(
+        return Box::new(Quadtree::Branch(
             low_bound(a.min(), b.min(), c.min(), d.min()),
             high_bound(a.max(), b.max(), c.max(), d.max()),
             a, b, c, d,
@@ -33,33 +40,36 @@ impl Quadtree {
     }
     pub fn min(&self) -> u8 {
         match self {
-            Quadtree::Leaf(value) => *value,
-            Quadtree::Quad(minimum, _, _, _, _, _, _) => *minimum,
+            Quadtree::Leaf(a, b, c, d) => min(min(*a, *b), min(*c, *d)),
+            Quadtree::Branch(minimum, _, _, _, _, _, _) => *minimum,
         }
     }
     pub fn max(&self) -> u8 {
         match self {
-            Quadtree::Leaf(value) => *value,
-            Quadtree::Quad(_, maximum, _, _, _, _, _) => *maximum,
+            Quadtree::Leaf(a, b, c, d) => max(max(*a, *b), max(*c, *d)),
+            Quadtree::Branch(_, maximum, _, _, _, _, _) => *maximum,
         }
     }
     #[allow(dead_code)]
     pub fn get(&self, p: Point) -> u8 {
         match self {
-            Quadtree::Leaf(value) => *value,
-            Quadtree::Quad(_, _, _, _, _, _, rank) => self.get_deep(p, 0, (0, 0), *rank),
+            Quadtree::Leaf(_, _, _, _) => self.get_deep(p, 0, (0, 0), 2),
+            Quadtree::Branch(_, _, _, _, _, _, rank) => self.get_deep(p, 0, (0, 0), *rank),
         }
     }
     pub fn get_approx(&self, p: Point, cutoff: u8) -> u8 {
         match self {
-            Quadtree::Leaf(value) => *value,
-            Quadtree::Quad(_, _, _, _, _, _, rank) => self.get_deep(p, cutoff, (0, 0), *rank),
+            Quadtree::Leaf(_, _, _, _) => self.get_deep(p, cutoff, (0, 0), 2),
+            Quadtree::Branch(_, _, _, _, _, _, rank) => self.get_deep(p, cutoff, (0, 0), *rank),
         }
     }
     pub fn average(&self) -> u8 {
         match self {
-            Quadtree::Leaf(value) => *value,
-            Quadtree::Quad(_, _, a, b, c, d, _) => {
+            Quadtree::Leaf(a, b, c, d) => {
+                let sum = *a as u32 + *b as u32 + *c as u32 + *d as u32;
+                return (sum / 4) as u8;
+            },
+            Quadtree::Branch(_, _, a, b, c, d, _) => {
                 let sum =
                     a.average() as u32 +
                     b.average() as u32 +
@@ -69,10 +79,19 @@ impl Quadtree {
             },
         }
     }
-    pub fn get_deep(&self, p: Point, cutoff: u8, self_offset: Point, window: u32) -> u8 {
+    pub fn get_deep(&self, p: Point, cutoff: u8, self_offset: Point, window: usize) -> u8 {
         match self {
-            Quadtree::Leaf(value) => *value,
-            Quadtree::Quad(min, max, a, b, c, d, _) => {
+            Quadtree::Leaf(a, b, c, d) => {
+                let (x, y) = p;
+                let (xo, yo) = self_offset;
+                match (x == xo, y == yo) {
+                    (true, true) => *a,
+                    (false, true) => *b,
+                    (true, false) => *c,
+                    (false, false) => *d,
+                }
+            },
+            Quadtree::Branch(min, max, a, b, c, d, _) => {
                 let contrast = max - min;
                 if contrast < cutoff {
                     return self.average();
@@ -109,7 +128,7 @@ mod tests {
     fn two_by_two_quadtree() {
         let bitmap = vec![1u8, 2u8, 3u8, 4u8];
         let quadtree = Quadtree::new(&&bitmap);
-        assert_quad_with_leafs(quadtree, 1, 2, 3, 4);
+        assert_leaf(quadtree, 1, 2, 3, 4);
     }
 
     #[test]
@@ -122,14 +141,14 @@ mod tests {
         ];
         let quadtree = Quadtree::new(&&bitmap);
         match *quadtree {
-            Quadtree::Leaf(_) => assert!(false),
-            Quadtree::Quad(min, max, a, b, c, d, _) => {
+            Quadtree::Leaf(_, _, _, _) => assert!(false),
+            Quadtree::Branch(min, max, a, b, c, d, _) => {
                 assert_eq!(min, 0);
                 assert_eq!(max, 255);
-                assert_quad_with_leafs(a, 1, 1, 1, 1);
-                assert_quad_with_leafs(b, 255, 255, 255, 255);
-                assert_quad_with_leafs(c, 3, 0, 0, 0);
-                assert_quad_with_leafs(d, 4, 4, 4, 4);
+                assert_leaf(a, 1, 1, 1, 1);
+                assert_leaf(b, 255, 255, 255, 255);
+                assert_leaf(c, 3, 0, 0, 0);
+                assert_leaf(d, 4, 4, 4, 4);
             },
         }
     }
@@ -177,24 +196,15 @@ mod tests {
         assert_eq!(4, quadtree.get_approx((3, 3), 5));
     }
 
-    fn assert_leaf(node: Box<Quadtree>, value: u8) {
+    fn assert_leaf(node: Box<Quadtree>, av: u8, bv: u8, cv: u8, dv: u8) {
         match *node {
-            Quadtree::Leaf(x) => assert_eq!(x, value),
-            Quadtree::Quad(_, _, _, _, _, _, _) => assert!(false),
-        }
-    }
-
-    fn assert_quad_with_leafs(quad: Box<Quadtree>, av: u8, bv: u8, cv: u8, dv: u8) {
-        match *quad {
-            Quadtree::Leaf(_) => assert!(false),
-            Quadtree::Quad(low, high, a, b, c, d, _) => {
-                assert_eq!(low, min(min(av, bv), min(cv, dv)));
-                assert_eq!(high, max(max(av, bv), max(cv, dv)));
-                assert_leaf(a, av);
-                assert_leaf(b, bv);
-                assert_leaf(c, cv);
-                assert_leaf(d, dv);
+            Quadtree::Leaf(a, b, c, d) => {
+                assert_eq!(a, av);
+                assert_eq!(b, bv);
+                assert_eq!(c, cv);
+                assert_eq!(d, dv);
             },
+            Quadtree::Branch(_, _, _, _, _, _, _) => assert!(false),
         }
     }
 }
