@@ -61,38 +61,36 @@ impl ImgCompressor {
         }
         let rank = (pixel_len as f32).sqrt() as u32;
         assert!(pixel_len as u32 == rank * rank);
-        let lumin_root = Quadtree::new(&&lumin);
-        let c_blu_root = Quadtree::new(&&c_blu);
-        let c_red_root = Quadtree::new(&&c_red);
+        let lumin_root = Quadtree::new(&lumin);
+        let c_blu_root = Quadtree::new(&c_blu);
+        let c_red_root = Quadtree::new(&c_red);
         return ImgCompressor { lumin_root, c_blu_root, c_red_root, rank };
     }
-    pub fn leaf_index(&self, quadtree_root: &Box<Quadtree>, cutoff: u8) -> BitVec<Local, u8> {
-        let mut quad_index: BitVec<Local, u8> = BitVec::new();
+
+    fn predicted_capacity(&self) -> usize {
+        return (self.rank * self.rank) as usize;
+    }
+
+    fn leaf_index(&self, quadtree_root: &Box<Quadtree>, cutoff: u8) -> BitVec<Local, u8> {
+        let mut quad_index: BitVec<Local, u8> = BitVec::with_capacity(self.predicted_capacity());
         build_leaf_index(quadtree_root, &mut quad_index, cutoff);
         return quad_index;
     }
-    pub fn leaf_data(&self, quadtree_root: &Box<Quadtree>, cutoff: u8) -> Vec<u8> {
-        let mut leaf_data = vec![0u8; 0];
+
+    fn leaf_data(&self, quadtree_root: &Box<Quadtree>, cutoff: u8) -> Vec<u8> {
+        let mut leaf_data = Vec::with_capacity(self.predicted_capacity());
         build_leaf_data(quadtree_root, &mut leaf_data, cutoff);
         return leaf_data;
     }
-    pub fn compressed_size(&self, cutoffs: Cutoff) -> usize {
-        let rd = self.leaf_data(&self.lumin_root, cutoffs.0);
-        let gd = self.leaf_data(&self.c_blu_root, cutoffs.1);
-        let bd = self.leaf_data(&self.c_red_root, cutoffs.2);
-        let ri = self.leaf_index(&self.lumin_root, cutoffs.0);
-        let gi = self.leaf_index(&self.c_blu_root, cutoffs.1);
-        let bi = self.leaf_index(&self.c_red_root, cutoffs.2);
-        return rd.len()+gd.len()+bd.len() + (ri.len()+gi.len()+bi.len())/8;
-    }
+
     pub fn to_file(&self, cutoffs: Cutoff) -> Vec<u8> {
-        let r_leaf = self.leaf_data(&self.lumin_root, cutoffs.0);
-        let g_leaf = self.leaf_data(&self.c_blu_root, cutoffs.1);
-        let b_leaf = self.leaf_data(&self.c_red_root, cutoffs.2);
         let r_index = self.leaf_index(&self.lumin_root, cutoffs.0).into_vec();
         let g_index = self.leaf_index(&self.c_blu_root, cutoffs.1).into_vec();
         let b_index = self.leaf_index(&self.c_red_root, cutoffs.2).into_vec();
-        return [
+        let r_leaf = self.leaf_data(&self.lumin_root, cutoffs.0);
+        let g_leaf = self.leaf_data(&self.c_blu_root, cutoffs.1);
+        let b_leaf = self.leaf_data(&self.c_red_root, cutoffs.2);
+        let bytes = [
             &r_index[..],
             &g_index[..],
             &b_index[..],
@@ -100,7 +98,9 @@ impl ImgCompressor {
             &g_leaf[..],
             &b_leaf[..]
         ].concat();
+        return bytes;
     }
+
     pub fn to_image(&self, cutoffs: Cutoff) -> RgbImage {
         let rank = self.rank;
         return ImageBuffer::from_fn(rank, rank, |x, y| {

@@ -9,12 +9,12 @@ pub enum Quadtree {
 pub type Point = (u32, u32);
 
 impl Quadtree {
-    pub fn new(pixels: &BitmapData) -> Box<Quadtree> {
+    pub fn new(pixels: BitmapData) -> Box<Quadtree> {
         let rank = (pixels.len() as f32).sqrt() as u32;
         assert!(pixels.len() as u32 == rank * rank);
         return Quadtree::build(pixels, rank, (0,0), rank);
     }
-    fn build(pixels: &BitmapData, rank: u32, p: Point, window: u32) -> Box<Quadtree> {
+    fn build(pixels: BitmapData, rank: u32, p: Point, window: u32) -> Box<Quadtree> {
         if window == 1 {
             let pixel = pixels[(p.0 + p.1*rank) as usize];
             return Box::new(Quadtree::Leaf(pixel))

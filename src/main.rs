@@ -1,18 +1,32 @@
 mod compressor;
 mod quadtree;
 mod serialize;
-use std::{env, fs};
+use std::{ env, fs, os::unix::fs::MetadataExt };
+use deflate::deflate_bytes;
+
 use crate::compressor::ImgCompressor;
 
 fn main() {
     let compression = parse_arguments(env::args().collect());
-    let compressor = ImgCompressor::new(image::open("./samples/lena.png"));
-    let outfile = "./samples/output.png";
-    let res = compressor.to_image(compression).save(outfile);
-    let size = compressor.compressed_size(compression);
-    let data = compressor.to_file(compression);
-    let _ = fs::write("./samples/output.ski", data);
-    println!("success: {}, compressed byte size: {} B", res.is_ok(), size);
+    test_case(compression, "lena");
+    test_case(compression, "lichtenstein");
+    test_case(compression, "mandelbrot");
+}
+
+fn test_case(compression: (u8, u8, u8), name: &str) {
+    let input_path = format!("./samples/{}.png", name);
+    let size_input = fs::metadata(&input_path).unwrap().size();
+    let compressor = ImgCompressor::new(image::open(&input_path));
+    let outfile = format!("./output/{}.png", name);
+    let png_result = compressor.to_image(compression).save(outfile);
+    if !png_result.is_ok() { return; }
+    let serialized_bytes = compressor.to_file(compression);
+    let file_bytes = deflate_bytes(&serialized_bytes);
+    let size_a = serialized_bytes.len();
+    let size_b = file_bytes.len();
+    let ski_result = fs::write(format!("./output/{}.ski", name), file_bytes);
+    let status = if ski_result.is_ok() { "" } else { "error " };
+    println!("{}{} -> {} -> {} -> {} {}", status, 512*512*3/1024, size_input / 1024, size_a / 1024, size_b / 1024, name);
 }
 
 fn parse_arguments(args: Vec<String>) -> (u8, u8, u8) {
